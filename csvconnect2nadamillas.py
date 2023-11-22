@@ -1,33 +1,40 @@
 # csvconnect2nadamillas (c) 2023 Baltasar MIT License <baltasarq@gmail.com>
 
 
+from datetime import datetime
 import json
 import csv
 import argparse
 
 
-"""
-Tipo de actividad,          Fecha,               Distancia, Tiempo
-Natación en piscina,        2023-11-21 09:15:22, 5.200,     01:42:26
-Natación en aguas abiertas, 2023-11-21 09:15:22, 5.200,     01:42:26
-
-->
-{
-    "_id":945,
-    "year":2023,
-    "month":6,
-    "day":20,
-    "distance":5247,
-    "seconds_used":6400,
-    "pool":false
-}
-"""
+ETQ_WORKOUTS = "workouts"
+ETQ_ID = "_id"
+ETQ_YEAR = "year"
+ETQ_MONTH = "month"
+ETQ_DAY = "day"
+ETQ_DISTANCE = "distance"
+ETQ_TIME = "seconds_used"
+ETQ_IS_POOL = "pool"
 
 
 TYPE = "Tipo de actividad"
 DATE = "Fecha"
 DISTANCE = "Distancia"
 TIME = "Tiempo"
+
+
+def parse_type(str_t: str):
+    """Determines whether the type is ows or pool swimming.
+    
+        :param str_t: The type of the swimming.
+        :return: true if it is pool swimming, false otherwise.
+    """
+    str_t = str_t.strip().lower()
+    pool_words = [
+        "pool", "piscina", "alberca"
+    ]
+    
+    return len([pw for pw in pool_words if pw in pool_words]) > 0
 
 
 def read_csv(fn: str):
@@ -37,19 +44,35 @@ def read_csv(fn: str):
             yield row
 
 
-def write_json(f, id, rec: dict):
+def rec_2_json(id: int, rec: dict):
+    """
+    [{
+        "_id":945,
+        "year":2023,
+        "month":6,
+        "day":20,
+        "distance":5247,
+        "seconds_used":6400,
+        "pool":false
+        }...]
+    """
+    date = parse_date(rec[DATE])
     
-    f.dump()
+    return {
+        ETQ_ID: id,
+        ETQ_YEAR: date.year,
+        ETQ_MONTH: date.month - 1,
+        ETQ_DAY: date.day,
+        ETQ_DISTANCE: parse_distance(rec[DISTANCE]),
+        ETQ_TIME: parse_time(rec[TIME]),
+        ETQ_IS_POOL: parse_type(rec[TYPE])
+    }
 
 
 def parse_distance(str_d: str):
     return int(str_d.replace(".", ""))
     
-    
-def parse_type(str_t: str):
-    return not(str_t == "Natación en aguas abiertas")
-    
-    
+
 def parse_time(str_t: str):
     str_parts = str_t.split(":")
     
@@ -84,14 +107,19 @@ def parse_date(str_d: str):
     if len(str_date_parts) < 3:
         raise ValueError("expected <year>-<month>-<day>, and not: " + str_d)
 
-    year = str_date_parts[0]
-    month = str_date_parts[1]
-    day = str_date_parts[2]
-    return f"{year}-{month}-{day}"
+    year = int(str_date_parts[0])
+    month = int(str_date_parts[1])
+    day = int(str_date_parts[2])
+    return datetime(year, month, day)
 
 
 def record2str(rec: dict):
-    return (parse_date(rec[DATE])
+    """Tipo de actividad,          Fecha,               Distancia, Tiempo
+       Natación en piscina,        2023-11-21 09:15:22, 5.200,     01:42:26
+       Natación en aguas abiertas, 2023-11-21 09:15:22, 5.200,     01:42:26
+    """
+
+    return (str(parse_date(rec[DATE]).date())
             + " " + ("pool" if parse_type(rec[TYPE]) else "ows")
             + ": " + str(parse_distance(rec[DISTANCE]))
             + " @ " + str(parse_time(rec[TIME])) + " s") 
@@ -113,14 +141,19 @@ if __name__ == "__main__":
                     
                     
     # Determine file input
-    print(args)
     id = args["start_id"] if args["start_id"] else 0
     input_file = args["filename"]
     output_file = "actividades.json"
-    print(f"Converting: {input_file}, id#{id}")
+    workouts = []
+    print(f"Converting: {input_file}, id #{id}")    
+    
+    # Convert CSV
+    for record in read_csv(input_file):
+        print(f"Writing record #{id}: {record2str(record)}") 
+        workouts += [rec_2_json(id, record)]
+        id += 1
+    
+    # Write JSON
     with open(output_file, "wt") as f_out:
-        for record in read_csv(input_file):
-            print(f"Writing record #{id}: {record2str(record)}") 
-            write_json(f_out, id, record)
-            id += 1
+        json.dump({ETQ_WORKOUTS: workouts}, f_out)
     print("Finished.")
